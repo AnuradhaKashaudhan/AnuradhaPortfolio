@@ -24,7 +24,7 @@ test('rejects honeypot submissions', async () => {
 })
 
 test('limits contact requests after five attempts', async () => {
-  const payload = { name: 'Valid Name', email: 'valid@example.com', subject: '', message: 'A valid message here' }
+  const payload = { name: 'A', email: 'invalid', message: 'short' }
   const responses = await Promise.all(Array.from({ length: 6 }, () => request(app).post('/api/contact').send(payload)))
   assert.equal(responses[5].status, 429)
 })

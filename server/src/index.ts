@@ -7,7 +7,36 @@ import nodemailer from 'nodemailer'
 import { basename, resolve } from 'node:path'
 import { z } from 'zod'
 
-dotenv.config()
+const envPath = resolve(__dirname, '../.env')
+const envConfig = dotenv.config({ path: envPath })
+if (envConfig.error) {
+  console.warn('Server environment file not found; using process environment variables.')
+} else {
+  console.info('Loaded server environment from server/.env.')
+}
+
+function safeErrorMessage(error: unknown): string {
+  let message = error instanceof Error ? error.message : String(error)
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value && /PASS|KEY|TOKEN|SECRET|SMTP_USER|TO_EMAIL/i.test(name)) {
+      message = message.split(value).join('[REDACTED]')
+    }
+  }
+  return message
+}
+
+const resendApiKey = process.env.RESEND_API_KEY
+const smtpUser = process.env.SMTP_USER
+const smtpPass = process.env.SMTP_PASS
+const smtpTransporter = !resendApiKey && smtpUser && smtpPass
+  ? nodemailer.createTransport({
+      service: process.env.SMTP_SERVICE ?? 'gmail',
+      auth: { user: smtpUser, pass: smtpPass },
+    })
+  : null
+if (!process.env.RECAPTCHA_SECRET_KEY) {
+  console.warn('reCAPTCHA secret is not configured; server CAPTCHA verification is disabled.')
+}
 
 export const contactSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -64,10 +93,7 @@ const sanitize = (value: string) => value.replace(/[<>]/g, '').trim()
 
 async function verifyRecaptcha(token: string | undefined, remoteIp: string | undefined) {
   const secret = process.env.RECAPTCHA_SECRET_KEY
-  if (!secret) {
-    if (process.env.NODE_ENV === 'production') throw new Error('CAPTCHA is not configured')
-    return true
-  }
+  if (!secret) return true
   if (!token) return false
   const response = await fetch('https://www.google.com/recaptcha/api/siteverify', {
     method: 'POST',
@@ -84,29 +110,35 @@ type EmailMessage = { to: string; subject: string; text: string; replyTo?: strin
 async function sendEmail(message: EmailMessage) {
   const resendKey = process.env.RESEND_API_KEY
   if (resendKey) {
+    const { replyTo, ...email } = message
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from: process.env.FROM_EMAIL ?? 'Portfolio <onboarding@resend.dev>',
-        ...message,
+        ...email,
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     })
     if (!response.ok) throw new Error(`Resend request failed with status ${response.status}`)
     return
   }
 
-  const smtpUser = process.env.SMTP_USER
-  const smtpPass = process.env.SMTP_PASS
-  if (!smtpUser || !smtpPass) throw new Error('Email configuration is incomplete')
-  const transporter = nodemailer.createTransport({
-    service: process.env.SMTP_SERVICE ?? 'gmail',
-    auth: { user: smtpUser, pass: smtpPass },
-  })
-  await transporter.sendMail({
+  if (!smtpTransporter || !smtpUser) throw new Error('SMTP_USER and SMTP_PASS are required for Gmail SMTP.')
+  await smtpTransporter.sendMail({
     from: `"${process.env.FROM_NAME ?? 'Portfolio contact'}" <${smtpUser}>`,
     ...message,
   })
+}
+
+if (process.env.NODE_ENV !== 'test' && !resendApiKey) {
+  if (!smtpTransporter) {
+    console.error('SMTP unavailable: SMTP_USER or SMTP_PASS is missing.')
+  } else {
+    void smtpTransporter.verify()
+      .then(() => console.info('SMTP ready.'))
+      .catch((error: unknown) => console.error(`SMTP verification failed: ${safeErrorMessage(error)}`))
+  }
 }
 
 app.get('/api/health', (_req, res) => {
@@ -181,7 +213,7 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
     }
 
     const toEmail = process.env.TO_EMAIL
-    if (!toEmail || (!process.env.RESEND_API_KEY && (!process.env.SMTP_USER || !process.env.SMTP_PASS))) {
+    if (!toEmail || (!resendApiKey && !smtpTransporter)) {
       console.error('Contact email configuration is incomplete.')
       return res.status(503).json({ error: 'Contact service is temporarily unavailable.' })
     }
@@ -195,17 +227,21 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
     await sendEmail({
       to: toEmail,
       replyTo: contact.email,
-      subject: `[Portfolio] ${contact.subject}`,
+      subject: `Portfolio: ${contact.subject}`,
       text: `Name: ${contact.name}\nEmail: ${contact.email}\n\n${contact.message}`,
     })
-    await sendEmail({
-      to: contact.email,
-      subject: 'Thanks for reaching out',
-      text: `Hi ${contact.name},\n\nThanks for your message. I have received it and will reply within 24 hours.\n\nBest,\n${process.env.FROM_NAME ?? 'Anuradha'}`,
-    })
+    try {
+      await sendEmail({
+        to: contact.email,
+        subject: 'Thanks for reaching out',
+        text: `Hi ${contact.name},\n\nThanks for your message. I have received it and will reply soon.\n\nBest,\n${process.env.FROM_NAME ?? 'Anuradha'}`,
+      })
+    } catch (error) {
+      console.error(`Contact auto-reply failed: ${safeErrorMessage(error)}`)
+    }
     return res.json({ success: true, message: 'Message sent successfully.' })
   } catch (error) {
-    console.error('Contact email failed:', error)
+    console.error(`Contact email failed: ${safeErrorMessage(error)}`)
     return res.status(500).json({ error: 'Unable to send your message right now.' })
   }
 })

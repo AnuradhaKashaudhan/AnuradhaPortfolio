@@ -32,6 +32,7 @@ const contactSchema = z.object({
 type ContactForm = z.infer<typeof contactSchema>
 
 const inputClass = 'w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[var(--color-border)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-blue-500/50 transition-colors'
+let captchaWarningShown = false
 
 export function ContactSection() {
   const [toasts, setToasts] = useState<ToastData[]>([])
@@ -48,7 +49,14 @@ export function ContactSection() {
   const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined
 
   useEffect(() => {
-    if (!recaptchaSiteKey || document.querySelector('script[data-recaptcha]')) return
+    if (!recaptchaSiteKey) {
+      if (!captchaWarningShown) {
+        console.warn('reCAPTCHA site key is not configured; contact form CAPTCHA is disabled.')
+        captchaWarningShown = true
+      }
+      return
+    }
+    if (document.querySelector('script[data-recaptcha]')) return
     const script = document.createElement('script')
     script.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(recaptchaSiteKey)}`
     script.async = true
@@ -68,8 +76,8 @@ export function ContactSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...values, recaptchaToken }),
       })
-      const result = await response.json().catch(() => ({})) as { message?: string; error?: string }
-      if (!response.ok) throw new Error(result.error ?? 'Unable to send your message.')
+      const result = await response.json().catch(() => ({})) as { success?: boolean; message?: string; error?: string }
+      if (!response.ok || result.success !== true) throw new Error(result.error ?? 'Unable to send your message.')
       reset()
       addToast('success', result.message ?? 'Message sent successfully.')
     } catch (error) {
