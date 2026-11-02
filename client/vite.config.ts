@@ -5,9 +5,8 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
+    dedupe: ['react', 'react-dom'],
     alias: {
-      react: `${import.meta.dirname}/node_modules/react`,
-      'react-dom': `${import.meta.dirname}/node_modules/react-dom`,
       '@': `${import.meta.dirname}/src`,
       '@components': `${import.meta.dirname}/src/components`,
       '@data': `${import.meta.dirname}/src/data`,

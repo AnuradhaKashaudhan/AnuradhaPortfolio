@@ -16,10 +16,10 @@
     "client",
     "server"
   ],
+  "engines": {
+    "node": ">=22.12"
+  },
   "devDependencies": {
     "prettier": "^3.2.5"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
