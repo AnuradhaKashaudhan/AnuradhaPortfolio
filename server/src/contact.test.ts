@@ -3,6 +3,12 @@ import test from 'node:test'
 import request from 'supertest'
 import app from './index'
 
+test('reports server health', async () => {
+  const response = await request(app).get('/health')
+  assert.equal(response.status, 200)
+  assert.deepEqual(response.body, { status: 'ok' })
+})
+
 test('rejects invalid contact payloads', async () => {
   const response = await request(app).post('/api/contact').send({ name: 'A', email: 'not-an-email', message: 'short' })
   assert.equal(response.status, 400)

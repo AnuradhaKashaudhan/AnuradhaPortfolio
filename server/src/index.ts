@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import nodemailer from 'nodemailer'
+import { basename, resolve } from 'node:path'
 import { z } from 'zod'
 
 dotenv.config()
@@ -19,17 +20,36 @@ export const contactSchema = z.object({
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
-const allowedOrigins = (process.env.CLIENT_ORIGIN ?? 'http://localhost:5173').split(',').map((origin) => origin.trim())
-
-app.use(helmet())
-app.use(express.json({ limit: '20kb' }))
-app.use(cors({
+const allowedOrigin = (process.env.CLIENT_ORIGIN ?? 'http://localhost:5173').trim().replace(/\/+$/, '')
+const corsMiddleware = cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
+    if (!origin || origin === allowedOrigin) return callback(null, true)
     return callback(new Error('Origin not allowed by CORS'))
   },
   credentials: false,
+})
+
+app.set('trust proxy', 1)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      scriptSrc: ["'self'", 'https://www.google.com', 'https://www.gstatic.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      styleSrcAttr: ["'unsafe-inline'"],
+      fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+      connectSrc: ["'self'", 'https://www.google.com', 'https://www.gstatic.com'],
+      frameSrc: ["'self'", 'https://www.google.com', 'https://recaptcha.google.com'],
+    },
+  },
 }))
+app.use(express.json({ limit: '20kb' }))
+app.use((req, res, next) => {
+  const origin = req.get('origin')
+  const requestOrigin = `${req.protocol}://${req.get('host')}`
+  if (origin && origin === requestOrigin) return next()
+  return corsMiddleware(req, res, next)
+})
 
 const contactLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -91,6 +111,10 @@ async function sendEmail(message: EmailMessage) {
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
+})
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' })
 })
 
 const assistantContext = `Name: Anuradha Kashaudhan
@@ -185,6 +209,26 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
     return res.status(500).json({ error: 'Unable to send your message right now.' })
   }
 })
+
+if (process.env.NODE_ENV === 'production') {
+  const clientDistPath = resolve(__dirname, '../../client/dist')
+  const indexHtmlPath = resolve(clientDistPath, 'index.html')
+
+  app.use(express.static(clientDistPath, {
+    setHeaders: (res, filePath) => {
+      if (/-[A-Za-z0-9_-]{8,}\.[^.]+$/.test(basename(filePath))) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      }
+    },
+  }))
+
+  app.get('*', (req, res, next) => {
+    if (req.path === '/api' || req.path.startsWith('/api/')) return next()
+    return res.sendFile(indexHtmlPath, (error) => {
+      if (error) next(error)
+    })
+  })
+}
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => console.warn(`Portfolio server running at http://localhost:${PORT}`))

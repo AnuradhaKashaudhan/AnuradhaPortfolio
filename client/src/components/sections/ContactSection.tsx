@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { ToastContainer, type ToastData } from '@/components/ui/Toast'
 import { profile } from '@/data/profile'
+import { apiUrl } from '@/lib/api'
 
 declare global {
   interface Window {
@@ -62,7 +63,7 @@ export function ContactSection() {
             void window.grecaptcha?.execute(recaptchaSiteKey, { action: 'contact' }).then(resolve)
           }))
         : undefined
-      const response = await fetch('/api/contact', {
+      const response = await fetch(apiUrl('/api/contact'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...values, recaptchaToken }),

@@ -16,7 +16,7 @@ I've shipped production projects ranging from AI-powered civic-tech platforms to
   degree: 'B.Tech Computer Science & Engineering',
   batch: '2023–2027',
   cgpa: '8.05',
-  resumeUrl: '[PLACEHOLDER_RESUME_URL]',
+  resumeUrl: '/AnuradhaCVG.pdf',
   socials: [
     {
       platform: 'GitHub',
