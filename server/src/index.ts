@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import nodemailer from 'nodemailer'
+import { existsSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { z } from 'zod'
 
@@ -246,24 +247,39 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
   }
 })
 
-if (process.env.NODE_ENV === 'production') {
-  const clientDistPath = resolve(__dirname, '../../client/dist')
-  const indexHtmlPath = resolve(clientDistPath, 'index.html')
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API route not found.' })
+})
 
+const clientDistPath = resolve(__dirname, '../../client/dist')
+const indexHtmlPath = resolve(clientDistPath, 'index.html')
+const hasClientBuild = existsSync(indexHtmlPath)
+
+console.info(`Serving client from ${clientDistPath}, index.html exists: ${hasClientBuild}`)
+
+if (hasClientBuild) {
   app.use(express.static(clientDistPath, {
+    maxAge: '1y',
+    index: false,
     setHeaders: (res, filePath) => {
-      if (/-[A-Za-z0-9_-]{8,}\.[^.]+$/.test(basename(filePath))) {
+      if (basename(filePath) === 'index.html') {
+        res.setHeader('Cache-Control', 'no-cache')
+      } else if (/-[A-Za-z0-9_-]{8,}\.[^.]+$/.test(basename(filePath))) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
       }
     },
   }))
 
-  app.get('*', (req, res, next) => {
-    if (req.path === '/api' || req.path.startsWith('/api/')) return next()
-    return res.sendFile(indexHtmlPath, (error) => {
+  app.get(/^\/(?!api\/).*/, (_req, res, next) => {
+    return res.sendFile(indexHtmlPath, {
+      cacheControl: false,
+      headers: { 'Cache-Control': 'no-cache' },
+    }, (error) => {
       if (error) next(error)
     })
   })
+} else {
+  console.warn(`Client build not found at ${indexHtmlPath}; frontend routes will not be served.`)
 }
 
 if (process.env.NODE_ENV !== 'test') {
